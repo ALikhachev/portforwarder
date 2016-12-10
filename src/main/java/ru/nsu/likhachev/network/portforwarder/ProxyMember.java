@@ -18,28 +18,38 @@ class ProxyMember {
     private ByteBuffer sendBuffer = ByteBuffer.allocate(BUFFER_SIZE);
 
     private ProxyMember pair;
+    private final SocketChannel channel;
 
-    void handleRead(SocketChannel channel) throws IOException {
-        int read = channel.read(this.recvBuffer);
+    ProxyMember(SocketChannel channel) {
+        this.channel = channel;
+    }
+
+    void handleRead() throws IOException {
+        int read = this.channel.read(this.recvBuffer);
         if (read <= 0) {
             return;
         }
-        logger.debug("Read {} bytes from {}", read, channel.getRemoteAddress());
+        logger.debug("Read {} bytes from {}", read, this.channel.getRemoteAddress());
         this.recvBuffer.flip();
         this.pair.sendBuffer.put(this.recvBuffer);
         this.recvBuffer.compact();
     }
 
-    void handleWrite(SocketChannel channel) throws IOException {
+    void handleWrite() throws IOException {
         if (this.sendBuffer.position() == 0) {
             return;
         }
         this.sendBuffer.flip();
-        logger.debug("Sent {} bytes to {}", channel.write(this.sendBuffer), channel.getRemoteAddress());
+        logger.debug("Sent {} bytes to {}", this.channel.write(this.sendBuffer), this.channel.getRemoteAddress());
         this.sendBuffer.compact();
     }
 
     void setPair(ProxyMember pair) {
         this.pair = pair;
+    }
+
+    void close() throws IOException {
+        this.channel.close();
+        this.pair.channel.close();
     }
 }

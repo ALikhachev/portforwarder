@@ -86,7 +86,7 @@ public class PortForwarder {
                 try {
                     if (!key.isValid()) {
                         key.cancel();
-                        key.channel().close();
+                        ((ProxyMember) key.attachment()).close();
                         logger.debug("Closed invalid key: {}", key);
                         continue;
                     }
@@ -95,40 +95,41 @@ public class PortForwarder {
                         SocketChannel clientChannel = localServerChannel.accept();
                         logger.info("Received connection from {}", clientChannel.getRemoteAddress());
 
-                        ProxyMember remoteServer = new ProxyMember();
-                        ProxyMember client = new ProxyMember();
-
-                        remoteServer.setPair(client);
-                        client.setPair(remoteServer);
+                        ProxyMember remoteServer;
+                        ProxyMember client;
 
                         logger.debug("Trying connect to {}:{}", this.remoteAddr, this.remotePort);
                         try {
                             SocketChannel remoteServerChannel = SocketChannel.open(new InetSocketAddress(this.remoteAddr, this.remotePort));
+                            remoteServer = new ProxyMember(remoteServerChannel);
+                            client = new ProxyMember(clientChannel);
                             remoteServerChannel.configureBlocking(false);
                             remoteServerChannel.register(selector, SelectionKey.OP_READ | SelectionKey.OP_WRITE, remoteServer);
-                            logger.debug("Connected to {}", remoteServerChannel.getRemoteAddress());
+                            logger.debug("Connected to {} ({})", remoteServerChannel.getRemoteAddress(), remoteServerChannel.getLocalAddress());
                         } catch (IOException | UnresolvedAddressException | java.nio.channels.UnsupportedAddressTypeException ex) {
                             clientChannel.close();
                             continue;
                         }
+
+                        remoteServer.setPair(client);
+                        client.setPair(remoteServer);
 
                         clientChannel.configureBlocking(false);
                         clientChannel.register(selector, SelectionKey.OP_READ | SelectionKey.OP_WRITE, client);
                     }
 
                     if (key.isReadable()) {
-                        SocketChannel channel = (SocketChannel) key.channel();
-                        ((ProxyMember) key.attachment()).handleRead(channel);
+                        ((ProxyMember) key.attachment()).handleRead();
                     }
 
                     if (key.isWritable()) {
-                        SocketChannel channel = (SocketChannel) key.channel();
-                        ((ProxyMember) key.attachment()).handleWrite(channel);
+                        ((ProxyMember) key.attachment()).handleWrite();
                     }
                 } catch (IOException ex) {
-                    logger.info("Lost client: {}", ((SocketChannel) key.channel()).getRemoteAddress());
+                    logger.info("Lost client: {} ({})",
+                            ((SocketChannel) key.channel()).getRemoteAddress(), ((SocketChannel) key.channel()).getLocalAddress());
                     key.cancel();
-                    key.channel().close();
+                    ((ProxyMember) key.attachment()).close();
                     logger.debug("IOException", ex);
                 } catch (Exception ex) {
                     logger.error("Some error occurred", ex);
