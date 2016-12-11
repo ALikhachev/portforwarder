@@ -14,8 +14,7 @@ import static ru.nsu.likhachev.network.portforwarder.Constants.BUFFER_SIZE;
  */
 class ProxyMember {
     private static final Logger logger = LogManager.getLogger("ProxyMember");
-    private ByteBuffer recvBuffer = ByteBuffer.allocate(BUFFER_SIZE);
-    private ByteBuffer sendBuffer = ByteBuffer.allocate(BUFFER_SIZE);
+    private ByteBuffer buffer = ByteBuffer.allocate(BUFFER_SIZE);
 
     private ProxyMember pair;
     private final SocketChannel channel;
@@ -25,23 +24,20 @@ class ProxyMember {
     }
 
     void handleRead() throws IOException {
-        int read = this.channel.read(this.recvBuffer);
+        int read = this.channel.read(this.pair.buffer);
         if (read <= 0) {
             return;
         }
         logger.debug("Read {} bytes from {}", read, this.channel.getRemoteAddress());
-        this.recvBuffer.flip();
-        this.pair.sendBuffer.put(this.recvBuffer);
-        this.recvBuffer.compact();
     }
 
     void handleWrite() throws IOException {
-        if (this.sendBuffer.position() == 0) {
+        if (this.buffer.position() == 0) {
             return;
         }
-        this.sendBuffer.flip();
-        logger.debug("Sent {} bytes to {}", this.channel.write(this.sendBuffer), this.channel.getRemoteAddress());
-        this.sendBuffer.compact();
+        this.buffer.flip();
+        logger.debug("Sent {} bytes to {}", this.channel.write(this.buffer), this.channel.getRemoteAddress());
+        this.buffer.compact();
     }
 
     void setPair(ProxyMember pair) {
