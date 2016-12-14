@@ -5,6 +5,9 @@ import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.channels.ClosedChannelException;
+import java.nio.channels.SelectionKey;
+import java.nio.channels.Selector;
 import java.nio.channels.SocketChannel;
 
 import static ru.nsu.likhachev.network.portforwarder.Constants.BUFFER_SIZE;
@@ -47,5 +50,17 @@ class ProxyMember {
     void close() throws IOException {
         this.channel.close();
         this.pair.channel.close();
+    }
+
+    void registerReadWrite(Selector selector) throws ClosedChannelException {
+        this.channel.register(selector, SelectionKey.OP_READ | SelectionKey.OP_WRITE, this);
+    }
+
+    ProxyMember getPair() {
+        return this.pair;
+    }
+
+    SocketChannel getChannel() {
+        return this.channel;
     }
 }

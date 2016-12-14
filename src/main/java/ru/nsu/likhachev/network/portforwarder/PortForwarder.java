@@ -90,6 +90,19 @@ public class PortForwarder {
                         logger.debug("Closed invalid key: {}", key);
                         continue;
                     }
+                    if (key.isConnectable()) {
+                        SocketChannel channel = (SocketChannel)key.channel();
+                        ProxyMember attachment = (ProxyMember) key.attachment();
+                        if (channel.finishConnect()) {
+                            logger.debug("Connected to {} ({})", channel.getRemoteAddress(), channel.getLocalAddress());
+                            key.interestOps(SelectionKey.OP_READ | SelectionKey.OP_WRITE);
+                            attachment.getPair().registerReadWrite(selector);
+                            logger.debug("Registered client ({}) to read & write operations", attachment.getPair().getChannel().getRemoteAddress());
+                        } else {
+                            attachment.close();
+                            logger.debug("Can't connect to {} ({}), discarding client connection", channel.getRemoteAddress(), channel.getLocalAddress());
+                        }
+                    }
                     if (key.isAcceptable()) {
                         ServerSocketChannel localServerChannel = (ServerSocketChannel) key.channel();
                         SocketChannel clientChannel = localServerChannel.accept();
@@ -100,12 +113,12 @@ public class PortForwarder {
 
                         logger.debug("Trying connect to {}:{}", this.remoteAddr, this.remotePort);
                         try {
-                            SocketChannel remoteServerChannel = SocketChannel.open(new InetSocketAddress(this.remoteAddr, this.remotePort));
+                            SocketChannel remoteServerChannel = SocketChannel.open();
+                            remoteServerChannel.configureBlocking(false);
+                            remoteServerChannel.connect(new InetSocketAddress(this.remoteAddr, this.remotePort));
                             remoteServer = new ProxyMember(remoteServerChannel);
                             client = new ProxyMember(clientChannel);
-                            remoteServerChannel.configureBlocking(false);
-                            remoteServerChannel.register(selector, SelectionKey.OP_READ | SelectionKey.OP_WRITE, remoteServer);
-                            logger.debug("Connected to {} ({})", remoteServerChannel.getRemoteAddress(), remoteServerChannel.getLocalAddress());
+                            remoteServerChannel.register(selector, SelectionKey.OP_CONNECT, remoteServer);
                         } catch (IOException | UnresolvedAddressException | java.nio.channels.UnsupportedAddressTypeException ex) {
                             clientChannel.close();
                             continue;
@@ -115,7 +128,7 @@ public class PortForwarder {
                         client.setPair(remoteServer);
 
                         clientChannel.configureBlocking(false);
-                        clientChannel.register(selector, SelectionKey.OP_READ | SelectionKey.OP_WRITE, client);
+                        clientChannel.register(selector, 0, clientChannel);
                     }
 
                     if (key.isReadable()) {
