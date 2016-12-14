@@ -16,6 +16,11 @@ import java.util.Iterator;
 public class PortForwarder {
     private static final Logger logger = LogManager.getLogger("PortForwarder");
 
+    private final int listenPort;
+    private final InetAddress remoteAddr;
+    private final int remotePort;
+    private boolean stop;
+
     public static void main(String[] args) {
         if (args.length < 3) {
             System.out.println("Usage: PortForwarder <listen-port> <remote-hostname> <remote-port>");
@@ -57,6 +62,8 @@ public class PortForwarder {
         } catch (IOException e) {
             logger.fatal("Cannot run PortForwarder", e);
         }
+
+        Runtime.getRuntime().addShutdownHook(new Thread(fwd::stop));
     }
 
     private Selector setupConnection() throws IOException {
@@ -74,90 +81,52 @@ public class PortForwarder {
     private void run() throws IOException {
         Selector selector = this.setupConnection();
         while (true) {
+            if (this.stop) {
+                logger.info("Bye...");
+                break;
+            }
             if (selector.select() == 0) {
                 continue;
             }
-
             Iterator<SelectionKey> selectedKeys = selector.selectedKeys().iterator();
             while (selectedKeys.hasNext()) {
                 SelectionKey key = selectedKeys.next();
-
                 try {
                     if (!key.isValid()) {
+                        logger.debug("Closed invalid key: {}", key.channel());
                         key.cancel();
                         ((ProxyMember) key.attachment()).close();
-                        logger.debug("Closed invalid key: {}", key);
                         continue;
                     }
                     if (key.isConnectable()) {
-                        SocketChannel channel = (SocketChannel) key.channel();
-                        ProxyMember attachment = (ProxyMember) key.attachment();
-                        if (channel.finishConnect()) {
-                            logger.debug("Connected to {} ({})", channel.getRemoteAddress(), channel.getLocalAddress());
-                            key.interestOps(SelectionKey.OP_READ | SelectionKey.OP_WRITE);
-                            attachment.getPair().registerReadWrite(selector);
-                            logger.debug("Registered client ({}) to read & write operations", attachment.getPair().getChannel().getRemoteAddress());
-                        } else {
-                            attachment.close();
-                            logger.debug("Can't connect to {} ({}), discarding client connection", channel.getRemoteAddress(), channel.getLocalAddress());
-                        }
+                        this.handleConnect(key, selector);
                     }
-                    if (key.isAcceptable()) {
-                        ServerSocketChannel localServerChannel = (ServerSocketChannel) key.channel();
-                        SocketChannel clientChannel = localServerChannel.accept();
-                        logger.info("Received connection from {}", clientChannel.getRemoteAddress());
-
-                        ProxyMember remoteServer;
-                        ProxyMember client;
-
-                        logger.debug("Trying connect to {}:{}", this.remoteAddr, this.remotePort);
-                        try {
-                            SocketChannel remoteServerChannel = SocketChannel.open();
-                            remoteServerChannel.configureBlocking(false);
-                            remoteServerChannel.connect(new InetSocketAddress(this.remoteAddr, this.remotePort));
-                            remoteServer = new ProxyMember(remoteServerChannel);
-                            client = new ProxyMember(clientChannel);
-                            remoteServerChannel.register(selector, SelectionKey.OP_CONNECT, remoteServer);
-                        } catch (IOException | UnresolvedAddressException | java.nio.channels.UnsupportedAddressTypeException ex) {
-                            clientChannel.close();
-                            continue;
-                        }
-
-                        remoteServer.setPair(client);
-                        client.setPair(remoteServer);
-
-                        clientChannel.configureBlocking(false);
-                        clientChannel.register(selector, 0, clientChannel);
+                    if (key.isAcceptable() && !this.handleAccept(key, selector)) {
+                        continue;
                     }
 
                     if (key.isReadable()) {
-                        ((ProxyMember) key.attachment()).handleRead();
+                        this.handleRead(key);
                     }
 
                     if (key.isWritable()) {
-                        ((ProxyMember) key.attachment()).handleWrite();
+                        this.handleWrite(key);
                     }
                 } catch (OutputShutdownException ex) {
-                    SocketChannel that = ex.getProxyMember().getChannel();
-                    SocketChannel pair = ex.getProxyMember().getPair().getChannel();
-                    that.register(selector, SelectionKey.OP_WRITE, ex.getProxyMember());
-                    pair.register(selector, SelectionKey.OP_READ, ex.getProxyMember().getPair());
-                    that.shutdownInput();
-                    pair.shutdownOutput();
-                    if (that.isConnected() && pair.isConnected()) {
-                        logger.info("Shutdown output for (caused by output shutdown of {} ({})): {} ({})",
-                                that.getRemoteAddress(), that.getLocalAddress(),
-                                pair.getRemoteAddress(), pair.getLocalAddress());
-                    } else {
-                        ex.getProxyMember().close();
-                        logger.info("closed");
-                    }
+                    ProxyMember that = ex.getProxyMember();
+                    ProxyMember pair = ex.getProxyMember().getPair();
+                    that.scheduleShutdownInput();
+                    pair.scheduleShutdownOutput();
+                } catch (ClosedChannelException ex) {
+                    key.cancel();
+                    ((ProxyMember) key.attachment()).close(); // ensure that pair is closed
                 } catch (IOException | CancelledKeyException ex) {
-                    logger.info("Lost client: {} ({})",
-                            ((SocketChannel) key.channel()).getRemoteAddress(), ((SocketChannel) key.channel()).getLocalAddress());
+                    logger.error("Lost client: {} ({})",
+                            ((SocketChannel) key.channel()).getRemoteAddress(),
+                            ((SocketChannel) key.channel()).getLocalAddress(),
+                            ex);
                     key.cancel();
                     ((ProxyMember) key.attachment()).close();
-                    //logger.debug("IOException", ex);
                 } catch (Exception ex) {
                     logger.error("Some error occurred", ex);
                 }
@@ -166,9 +135,91 @@ public class PortForwarder {
         }
     }
 
-    private final int listenPort;
-    private final InetAddress remoteAddr;
-    private final int remotePort;
+    private void handleConnect(SelectionKey key, Selector selector) throws IOException {
+        SocketChannel channel = (SocketChannel) key.channel();
+        ProxyMember attachment = (ProxyMember) key.attachment();
+        if (channel.finishConnect()) {
+            logger.debug("Connected to {} ({})", channel.getRemoteAddress(), channel.getLocalAddress());
+            key.interestOps(SelectionKey.OP_READ | SelectionKey.OP_WRITE);
+            attachment.getPair().registerReadWrite(selector);
+            logger.debug("Registered client ({}) to read & write operations", attachment.getPair().getChannel().getRemoteAddress());
+        } else {
+            attachment.close();
+            logger.debug("Can't connect to {} ({}), discarding client connection", channel.getRemoteAddress(), channel.getLocalAddress());
+        }
+    }
+
+    private boolean handleAccept(SelectionKey key, Selector selector) throws IOException {
+        ServerSocketChannel localServerChannel = (ServerSocketChannel) key.channel();
+        SocketChannel clientChannel = localServerChannel.accept();
+        logger.info("Received connection from {}", clientChannel.getRemoteAddress());
+
+        ProxyMember remoteServer;
+        ProxyMember client;
+
+        logger.debug("Trying connect to {}:{}", this.remoteAddr, this.remotePort);
+        try {
+            SocketChannel remoteServerChannel = SocketChannel.open();
+            remoteServerChannel.configureBlocking(false);
+            remoteServerChannel.connect(new InetSocketAddress(this.remoteAddr, this.remotePort));
+            remoteServer = new ProxyMember(remoteServerChannel);
+            client = new ProxyMember(clientChannel);
+            remoteServerChannel.register(selector, SelectionKey.OP_CONNECT, remoteServer);
+        } catch (IOException | UnresolvedAddressException | java.nio.channels.UnsupportedAddressTypeException ex) {
+            clientChannel.close();
+            key.cancel();
+            return false;
+        }
+
+        remoteServer.setPair(client);
+        client.setPair(remoteServer);
+
+        clientChannel.configureBlocking(false);
+        clientChannel.register(selector, 0, clientChannel);
+        return true;
+    }
+
+    private void handleWrite(SelectionKey key) throws IOException {
+        ProxyMember attachment = (ProxyMember) key.attachment();
+        SocketChannel channel = (SocketChannel) key.channel();
+        if (attachment.isShutdownOutput()) {
+            channel.shutdownOutput();
+            logger.info("Shutdown output for {} ({})",
+                    channel.getRemoteAddress(), channel.getLocalAddress());
+            key.interestOps(key.interestOps() & ~SelectionKey.OP_WRITE);
+            if (key.interestOps() == 0) {
+                logger.info("Client disconnected {} ({})",
+                        channel.getRemoteAddress(), channel.getLocalAddress());
+                attachment.close();
+                key.cancel();
+            }
+        } else {
+            attachment.handleWrite();
+        }
+    }
+
+    private void handleRead(SelectionKey key) throws IOException {
+        ProxyMember attachment = (ProxyMember) key.attachment();
+        SocketChannel channel = (SocketChannel) key.channel();
+        if (attachment.isShutdownInput()) {
+            channel.shutdownInput();
+            logger.info("Shutdown input for {} ({})",
+                    channel.getRemoteAddress(), channel.getLocalAddress());
+            key.interestOps(key.interestOps() & ~SelectionKey.OP_READ);
+            if (key.interestOps() == 0) {
+                logger.info("Client disconnected {} ({})",
+                        channel.getRemoteAddress(), channel.getLocalAddress());
+                attachment.close();
+                key.cancel();
+            }
+        } else {
+            attachment.handleRead();
+        }
+    }
+
+    private void stop() {
+        this.stop = true;
+    }
 
     public PortForwarder(int listenPort, InetAddress remoteAddr, int remotePort) {
         this.listenPort = listenPort;

@@ -12,7 +12,7 @@ class OutputShutdownException extends IOException {
         this.proxyMember = proxyMember;
     }
 
-    public ProxyMember getProxyMember() {
+    ProxyMember getProxyMember() {
         return this.proxyMember;
     }
 }

@@ -21,6 +21,8 @@ class ProxyMember {
 
     private ProxyMember pair;
     private final SocketChannel channel;
+    private boolean shutdownInput = false;
+    private boolean shutdownOutput = false;
 
     ProxyMember(SocketChannel channel) {
         this.channel = channel;
@@ -38,7 +40,7 @@ class ProxyMember {
     }
 
     void handleWrite() throws IOException {
-        if (this.buffer.position() == 0 || (this.channel.validOps() & SelectionKey.OP_WRITE) == 0) {
+        if (this.buffer.position() == 0) {
             return;
         }
         this.buffer.flip();
@@ -65,5 +67,21 @@ class ProxyMember {
 
     SocketChannel getChannel() {
         return this.channel;
+    }
+
+    void scheduleShutdownInput() {
+        this.shutdownInput = true;
+    }
+
+    void scheduleShutdownOutput() {
+        this.shutdownOutput = true;
+    }
+
+    boolean isShutdownInput() {
+        return this.shutdownInput;
+    }
+
+    boolean isShutdownOutput() {
+        return this.shutdownOutput;
     }
 }
