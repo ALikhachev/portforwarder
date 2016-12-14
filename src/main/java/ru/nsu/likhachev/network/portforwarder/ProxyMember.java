@@ -29,6 +29,9 @@ class ProxyMember {
     void handleRead() throws IOException {
         int read = this.channel.read(this.pair.buffer);
         if (read <= 0) {
+            if (read < 0) {
+                this.channel.close();
+            }
             return;
         }
         logger.debug("Read {} bytes from {}", read, this.channel.getRemoteAddress());
