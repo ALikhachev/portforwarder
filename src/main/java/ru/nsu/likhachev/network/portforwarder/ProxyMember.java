@@ -30,7 +30,7 @@ class ProxyMember {
         int read = this.channel.read(this.pair.buffer);
         if (read <= 0) {
             if (read < 0) {
-                throw new IOException("read error");
+                throw new OutputShutdownException(this);
             }
             return;
         }

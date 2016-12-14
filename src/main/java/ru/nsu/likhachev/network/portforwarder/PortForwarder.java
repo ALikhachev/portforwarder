@@ -138,6 +138,15 @@ public class PortForwarder {
                     if (key.isWritable()) {
                         ((ProxyMember) key.attachment()).handleWrite();
                     }
+                } catch (OutputShutdownException ex) {
+                    SocketChannel that = ex.getProxyMember().getChannel();
+                    SocketChannel pair = ex.getProxyMember().getPair().getChannel();
+                    that.register(selector, SelectionKey.OP_WRITE, ex.getProxyMember());
+                    pair.register(selector, SelectionKey.OP_READ, ex.getProxyMember().getPair());
+                    pair.shutdownOutput();
+                    logger.info("Shutdown output for (caused by output shutdown of {} ({})): {} ({})",
+                            that.getRemoteAddress(), that.getLocalAddress(),
+                            pair.getRemoteAddress(), pair.getLocalAddress());
                 } catch (IOException | CancelledKeyException ex) {
                     logger.info("Lost client: {} ({})",
                             ((SocketChannel) key.channel()).getRemoteAddress(), ((SocketChannel) key.channel()).getLocalAddress());
