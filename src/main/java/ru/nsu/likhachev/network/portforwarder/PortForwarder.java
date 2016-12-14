@@ -91,7 +91,7 @@ public class PortForwarder {
                         continue;
                     }
                     if (key.isConnectable()) {
-                        SocketChannel channel = (SocketChannel)key.channel();
+                        SocketChannel channel = (SocketChannel) key.channel();
                         ProxyMember attachment = (ProxyMember) key.attachment();
                         if (channel.finishConnect()) {
                             logger.debug("Connected to {} ({})", channel.getRemoteAddress(), channel.getLocalAddress());
@@ -138,12 +138,12 @@ public class PortForwarder {
                     if (key.isWritable()) {
                         ((ProxyMember) key.attachment()).handleWrite();
                     }
-                } catch (IOException ex) {
+                } catch (IOException | CancelledKeyException ex) {
                     logger.info("Lost client: {} ({})",
                             ((SocketChannel) key.channel()).getRemoteAddress(), ((SocketChannel) key.channel()).getLocalAddress());
                     key.cancel();
                     ((ProxyMember) key.attachment()).close();
-                    logger.debug("IOException", ex);
+                    //logger.debug("IOException", ex);
                 } catch (Exception ex) {
                     logger.error("Some error occurred", ex);
                 }
