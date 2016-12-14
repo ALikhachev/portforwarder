@@ -38,7 +38,7 @@ class ProxyMember {
     }
 
     void handleWrite() throws IOException {
-        if (this.buffer.position() == 0) {
+        if (this.buffer.position() == 0 || (this.channel.validOps() & SelectionKey.OP_WRITE) == 0) {
             return;
         }
         this.buffer.flip();

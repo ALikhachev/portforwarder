@@ -73,7 +73,6 @@ public class PortForwarder {
 
     private void run() throws IOException {
         Selector selector = this.setupConnection();
-
         while (true) {
             if (selector.select() == 0) {
                 continue;
@@ -143,10 +142,16 @@ public class PortForwarder {
                     SocketChannel pair = ex.getProxyMember().getPair().getChannel();
                     that.register(selector, SelectionKey.OP_WRITE, ex.getProxyMember());
                     pair.register(selector, SelectionKey.OP_READ, ex.getProxyMember().getPair());
+                    that.shutdownInput();
                     pair.shutdownOutput();
-                    logger.info("Shutdown output for (caused by output shutdown of {} ({})): {} ({})",
-                            that.getRemoteAddress(), that.getLocalAddress(),
-                            pair.getRemoteAddress(), pair.getLocalAddress());
+                    if (that.isConnected() && pair.isConnected()) {
+                        logger.info("Shutdown output for (caused by output shutdown of {} ({})): {} ({})",
+                                that.getRemoteAddress(), that.getLocalAddress(),
+                                pair.getRemoteAddress(), pair.getLocalAddress());
+                    } else {
+                        ex.getProxyMember().close();
+                        logger.info("closed");
+                    }
                 } catch (IOException | CancelledKeyException ex) {
                     logger.info("Lost client: {} ({})",
                             ((SocketChannel) key.channel()).getRemoteAddress(), ((SocketChannel) key.channel()).getLocalAddress());
