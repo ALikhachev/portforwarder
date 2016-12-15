@@ -5,7 +5,6 @@ import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.channels.ClosedChannelException;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 import java.nio.channels.SocketChannel;
@@ -21,12 +20,15 @@ class ProxyMember {
 
     private ProxyMember pair;
     private final SocketChannel channel;
+    private final Selector selector;
     private boolean shutdownInput = false;
     private boolean shutdownOutput = false;
     private boolean wantClose = false;
+    private int interestOps = 0;
 
-    ProxyMember(SocketChannel channel) {
+    ProxyMember(SocketChannel channel, Selector selector) {
         this.channel = channel;
+        this.selector = selector;
     }
 
     void handleRead() throws IOException {
@@ -37,16 +39,17 @@ class ProxyMember {
             }
             return;
         }
+        this.pair.registerWrite();
         logger.debug("Read {} bytes from {}", read, this.channel.getRemoteAddress());
     }
 
     void handleWrite() throws IOException {
-        if (this.buffer.position() == 0) {
-            return;
-        }
         this.buffer.flip();
         logger.debug("Sent {} bytes to {}", this.channel.write(this.buffer), this.channel.getRemoteAddress());
         this.buffer.compact();
+        if (this.buffer.position() == 0) {
+            this.unregisterWrite();
+        }
     }
 
     void setPair(ProxyMember pair) {
@@ -65,8 +68,28 @@ class ProxyMember {
         this.pair.channel.close();
     }
 
-    void registerReadWrite(Selector selector) throws ClosedChannelException {
-        this.channel.register(selector, SelectionKey.OP_READ | SelectionKey.OP_WRITE, this);
+    void registerRead() throws IOException {
+        logger.debug("Registered read {} ({})", this.channel.getRemoteAddress(), this.channel.getLocalAddress());
+        this.interestOps |= SelectionKey.OP_READ;
+        this.channel.register(this.selector, this.interestOps, this);
+    }
+
+    void unregisterRead() throws IOException {
+        logger.debug("Unegistered read {} ({})", this.channel.getRemoteAddress(), this.channel.getLocalAddress());
+        this.interestOps &= ~SelectionKey.OP_READ;
+        this.channel.register(this.selector, this.interestOps, this);
+    }
+
+    void registerWrite() throws IOException {
+        logger.debug("Registered write {} ({})", this.channel.getRemoteAddress(), this.channel.getLocalAddress());
+        this.interestOps |= SelectionKey.OP_WRITE;
+        this.channel.register(this.selector, this.interestOps, this);
+    }
+
+    void unregisterWrite() throws IOException {
+        logger.debug("Unegistered write {} ({})", this.channel.getRemoteAddress(), this.channel.getLocalAddress());
+        this.interestOps &= ~SelectionKey.OP_WRITE;
+        this.channel.register(this.selector, this.interestOps, this);
     }
 
     ProxyMember getPair() {
@@ -90,10 +113,14 @@ class ProxyMember {
     }
 
     boolean isShutdownOutput() {
-        return this.shutdownOutput;
+        return this.buffer.position() == 0 && this.shutdownOutput;
     }
 
-    public boolean isReadyToClose() {
+    boolean isReadyToClose() {
         return this.wantClose && this.pair.wantClose && this.buffer.position() == 0 && this.pair.buffer.position() == 0;
+    }
+
+    boolean hasData() {
+        return this.buffer.position() > 0;
     }
 }

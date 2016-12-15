@@ -99,7 +99,7 @@ public class PortForwarder {
                         continue;
                     }
                     if (key.isConnectable()) {
-                        this.handleConnect(key, selector);
+                        this.handleConnect(key);
                     }
                     if (key.isAcceptable() && !this.handleAccept(key, selector)) {
                         continue;
@@ -143,13 +143,13 @@ public class PortForwarder {
         }
     }
 
-    private void handleConnect(SelectionKey key, Selector selector) throws IOException {
+    private void handleConnect(SelectionKey key) throws IOException {
         SocketChannel channel = (SocketChannel) key.channel();
         ProxyMember attachment = (ProxyMember) key.attachment();
         if (channel.finishConnect()) {
             logger.debug("Connected to {} ({})", channel.getRemoteAddress(), channel.getLocalAddress());
-            key.interestOps(SelectionKey.OP_READ | SelectionKey.OP_WRITE);
-            attachment.getPair().registerReadWrite(selector);
+            attachment.registerRead();
+            attachment.getPair().registerRead();
             logger.debug("Registered client ({}) to read & write operations", attachment.getPair().getChannel().getRemoteAddress());
         } else {
             attachment.wantClose();
@@ -170,8 +170,8 @@ public class PortForwarder {
             SocketChannel remoteServerChannel = SocketChannel.open();
             remoteServerChannel.configureBlocking(false);
             remoteServerChannel.connect(new InetSocketAddress(this.remoteAddr, this.remotePort));
-            remoteServer = new ProxyMember(remoteServerChannel);
-            client = new ProxyMember(clientChannel);
+            remoteServer = new ProxyMember(remoteServerChannel, selector);
+            client = new ProxyMember(clientChannel, selector);
             remoteServerChannel.register(selector, SelectionKey.OP_CONNECT, remoteServer);
         } catch (IOException | UnresolvedAddressException | java.nio.channels.UnsupportedAddressTypeException ex) {
             clientChannel.close();
@@ -194,7 +194,7 @@ public class PortForwarder {
             channel.shutdownOutput();
             logger.info("Shutdown output for {} ({})",
                     channel.getRemoteAddress(), channel.getLocalAddress());
-            key.interestOps(key.interestOps() & ~SelectionKey.OP_WRITE);
+            attachment.unregisterWrite();
             if (key.interestOps() == 0) {
                 logger.info("Client disconnected {} ({})",
                         channel.getRemoteAddress(), channel.getLocalAddress());
@@ -212,7 +212,7 @@ public class PortForwarder {
             channel.shutdownInput();
             logger.info("Shutdown input for {} ({})",
                     channel.getRemoteAddress(), channel.getLocalAddress());
-            key.interestOps(key.interestOps() & ~SelectionKey.OP_READ);
+            attachment.unregisterRead();
             if (key.interestOps() == 0) {
                 logger.info("Client disconnected {} ({})",
                         channel.getRemoteAddress(), channel.getLocalAddress());
