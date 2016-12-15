@@ -106,11 +106,11 @@ public class PortForwarder {
                     }
 
                     if (key.isReadable()) {
-                        this.handleRead(key);
+                        ((ProxyMember) key.attachment()).handleRead();
                     }
 
                     if (key.isWritable()) {
-                        this.handleWrite(key);
+                        ((ProxyMember) key.attachment()).handleWrite();
                     }
 
                     if (key.attachment() instanceof ProxyMember) {
@@ -120,11 +120,6 @@ public class PortForwarder {
                             key.cancel();
                         }
                     }
-                } catch (OutputShutdownException ex) {
-                    ProxyMember that = ex.getProxyMember();
-                    ProxyMember pair = ex.getProxyMember().getPair();
-                    that.scheduleShutdownInput();
-                    pair.scheduleShutdownOutput();
                 } catch (ClosedChannelException ex) {
                     key.cancel();
                     ((ProxyMember) key.attachment()).wantClose(); // ensure that pair is closed
@@ -150,7 +145,6 @@ public class PortForwarder {
             logger.debug("Connected to {} ({})", channel.getRemoteAddress(), channel.getLocalAddress());
             attachment.registerRead();
             attachment.getPair().registerRead();
-            logger.debug("Registered client ({}) to read & write operations", attachment.getPair().getChannel().getRemoteAddress());
         } else {
             attachment.wantClose();
             logger.debug("Can't connect to {} ({}), discarding client connection", channel.getRemoteAddress(), channel.getLocalAddress());
@@ -187,47 +181,11 @@ public class PortForwarder {
         return true;
     }
 
-    private void handleWrite(SelectionKey key) throws IOException {
-        ProxyMember attachment = (ProxyMember) key.attachment();
-        SocketChannel channel = (SocketChannel) key.channel();
-        if (attachment.isShutdownOutput()) {
-            channel.shutdownOutput();
-            logger.info("Shutdown output for {} ({})",
-                    channel.getRemoteAddress(), channel.getLocalAddress());
-            attachment.unregisterWrite();
-            if (key.interestOps() == 0) {
-                logger.info("Client disconnected {} ({})",
-                        channel.getRemoteAddress(), channel.getLocalAddress());
-                attachment.wantClose();
-            }
-        } else {
-            attachment.handleWrite();
-        }
-    }
-
-    private void handleRead(SelectionKey key) throws IOException {
-        ProxyMember attachment = (ProxyMember) key.attachment();
-        SocketChannel channel = (SocketChannel) key.channel();
-        if (attachment.isShutdownInput()) {
-            channel.shutdownInput();
-            logger.info("Shutdown input for {} ({})",
-                    channel.getRemoteAddress(), channel.getLocalAddress());
-            attachment.unregisterRead();
-            if (key.interestOps() == 0) {
-                logger.info("Client disconnected {} ({})",
-                        channel.getRemoteAddress(), channel.getLocalAddress());
-                attachment.wantClose();
-            }
-        } else {
-            attachment.handleRead();
-        }
-    }
-
     private void stop() {
         this.stop = true;
     }
 
-    public PortForwarder(int listenPort, InetAddress remoteAddr, int remotePort) {
+    private PortForwarder(int listenPort, InetAddress remoteAddr, int remotePort) {
         this.listenPort = listenPort;
         this.remoteAddr = remoteAddr;
         this.remotePort = remotePort;
