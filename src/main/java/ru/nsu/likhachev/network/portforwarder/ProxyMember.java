@@ -23,6 +23,7 @@ class ProxyMember {
     private final SocketChannel channel;
     private boolean shutdownInput = false;
     private boolean shutdownOutput = false;
+    private boolean wantClose = false;
 
     ProxyMember(SocketChannel channel) {
         this.channel = channel;
@@ -52,8 +53,15 @@ class ProxyMember {
         this.pair = pair;
     }
 
+    void wantClose() {
+        this.wantClose = true;
+        this.pair.wantClose = true;
+    }
+
     void close() throws IOException {
+        logger.debug("Closed channel for {} ({})", this.channel.getRemoteAddress(), this.channel.getLocalAddress());
         this.channel.close();
+        logger.debug("Closed channel for {} ({})", this.pair.channel.getRemoteAddress(), this.pair.channel.getLocalAddress());
         this.pair.channel.close();
     }
 
@@ -83,5 +91,9 @@ class ProxyMember {
 
     boolean isShutdownOutput() {
         return this.shutdownOutput;
+    }
+
+    public boolean isReadyToClose() {
+        return this.wantClose && this.pair.wantClose && this.buffer.position() == 0 && this.pair.buffer.position() == 0;
     }
 }

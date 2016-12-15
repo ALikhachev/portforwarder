@@ -95,7 +95,7 @@ public class PortForwarder {
                     if (!key.isValid()) {
                         logger.debug("Closed invalid key: {}", key.channel());
                         key.cancel();
-                        ((ProxyMember) key.attachment()).close();
+                        ((ProxyMember) key.attachment()).wantClose();
                         continue;
                     }
                     if (key.isConnectable()) {
@@ -112,6 +112,14 @@ public class PortForwarder {
                     if (key.isWritable()) {
                         this.handleWrite(key);
                     }
+
+                    if (key.attachment() instanceof ProxyMember) {
+                        ProxyMember attachment = (ProxyMember) key.attachment();
+                        if (attachment.isReadyToClose()) {
+                            attachment.close();
+                            key.cancel();
+                        }
+                    }
                 } catch (OutputShutdownException ex) {
                     ProxyMember that = ex.getProxyMember();
                     ProxyMember pair = ex.getProxyMember().getPair();
@@ -119,14 +127,14 @@ public class PortForwarder {
                     pair.scheduleShutdownOutput();
                 } catch (ClosedChannelException ex) {
                     key.cancel();
-                    ((ProxyMember) key.attachment()).close(); // ensure that pair is closed
+                    ((ProxyMember) key.attachment()).wantClose(); // ensure that pair is closed
                 } catch (IOException | CancelledKeyException ex) {
                     logger.error("Lost client: {} ({})",
                             ((SocketChannel) key.channel()).getRemoteAddress(),
                             ((SocketChannel) key.channel()).getLocalAddress(),
                             ex);
                     key.cancel();
-                    ((ProxyMember) key.attachment()).close();
+                    ((ProxyMember) key.attachment()).wantClose();
                 } catch (Exception ex) {
                     logger.error("Some error occurred", ex);
                 }
@@ -144,7 +152,7 @@ public class PortForwarder {
             attachment.getPair().registerReadWrite(selector);
             logger.debug("Registered client ({}) to read & write operations", attachment.getPair().getChannel().getRemoteAddress());
         } else {
-            attachment.close();
+            attachment.wantClose();
             logger.debug("Can't connect to {} ({}), discarding client connection", channel.getRemoteAddress(), channel.getLocalAddress());
         }
     }
@@ -190,8 +198,7 @@ public class PortForwarder {
             if (key.interestOps() == 0) {
                 logger.info("Client disconnected {} ({})",
                         channel.getRemoteAddress(), channel.getLocalAddress());
-                attachment.close();
-                key.cancel();
+                attachment.wantClose();
             }
         } else {
             attachment.handleWrite();
@@ -209,8 +216,7 @@ public class PortForwarder {
             if (key.interestOps() == 0) {
                 logger.info("Client disconnected {} ({})",
                         channel.getRemoteAddress(), channel.getLocalAddress());
-                attachment.close();
-                key.cancel();
+                attachment.wantClose();
             }
         } else {
             attachment.handleRead();
