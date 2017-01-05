@@ -10,6 +10,7 @@ import java.nio.channels.Selector;
 import java.nio.channels.SocketChannel;
 
 import static ru.nsu.likhachev.network.portforwarder.Constants.BUFFER_SIZE;
+import static ru.nsu.likhachev.network.portforwarder.Constants.END_OF_STREAM;
 
 /**
  * Copyright (c) 2016 Alexander Likhachev.
@@ -32,14 +33,14 @@ class ProxyMember {
 
     void handleRead() throws IOException {
         int read = this.channel.read(this.pair.buffer);
-        if (read <= 0) {
-            if (read < 0) {
-                this.unregisterRead();
-                this.channel.shutdownInput();
-                this.tryRequestClose();
-                this.pair.wantShutdownOutput = true;
-            }
-            return;
+        if (read == END_OF_STREAM) {
+            this.unregisterRead();
+            this.channel.shutdownInput();
+            this.tryRequestClose();
+            this.pair.wantShutdownOutput = true;
+        }
+        if (!this.pair.buffer.hasRemaining()) {
+            this.unregisterRead();
         }
         this.pair.registerWrite();
         logger.debug("Read {} bytes from {}", read, this.channel.getRemoteAddress());
@@ -49,6 +50,11 @@ class ProxyMember {
         this.buffer.flip();
         logger.debug("Sent {} bytes to {}", this.channel.write(this.buffer), this.channel.getRemoteAddress());
         this.buffer.compact();
+        if (this.buffer.hasRemaining()) {
+            if (!this.pair.channel.socket().isInputShutdown()) {
+                this.pair.registerRead();
+            }
+        }
         if (this.buffer.position() == 0) {
             if (this.wantShutdownOutput) {
                 this.channel.shutdownOutput();
