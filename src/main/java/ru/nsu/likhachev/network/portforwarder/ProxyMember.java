@@ -46,16 +46,14 @@ class ProxyMember {
     }
 
     void handleWrite() throws IOException {
-        if (this.wantShutdownOutput && this.buffer.position() == 0) {
-            this.unregisterWrite();
-            this.channel.shutdownOutput();
-            this.tryRequestClose();
-            return;
-        }
         this.buffer.flip();
         logger.debug("Sent {} bytes to {}", this.channel.write(this.buffer), this.channel.getRemoteAddress());
         this.buffer.compact();
         if (this.buffer.position() == 0) {
+            if (this.wantShutdownOutput) {
+                this.channel.shutdownOutput();
+                this.tryRequestClose();
+            }
             this.unregisterWrite();
         }
     }
